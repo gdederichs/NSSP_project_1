@@ -1,3 +1,4 @@
+import tqdm
 async def importFSLasync():
     #load fsl module
     import lmod
