@@ -19,8 +19,7 @@ def loadFSL():
     """
     import asyncio
     import os
-    # We need to do the import asynchronously, as modules rely on await within
-    #asyncio.run(importFSLasync())
+    
     os.environ["FSLDIR"]="/cvmfs/neurodesk.ardc.edu.au/containers/fsl_6.0.7.4_20231005/fsl_6.0.7.4_20231005.simg/opt/fsl-6.0.7.4/"
     os.environ["FSLOUTPUTTYPE"]="NIFTI_GZ"
     os.environ["SINGULARITY_BINDPATH"]="/data,/neurodesktop-storage,/tmp,/cvmfs"
