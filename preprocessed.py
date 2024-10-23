@@ -5,12 +5,13 @@ from utils import mkdir_no_exist
 from fsl.wrappers import fast, bet, mcflirt
 from fsl.wrappers.misc import fslroi
 from fsl.wrappers import flirt
+import nibabel as nib
 
 def get_skull_stripped_anatomical(bids_root, preproc_path, subject, robust=False):
     """
     Function to perform skull-stripping (removing the skull around the brain).
     This is a simple wrapper around the brain extraction tool (BET) in FSL's suite
-    It assumes data to be in the BIDS format (which we will cover in the following weeks).
+    It assumes data to be in the BIDS format
     The method also saves the brain mask which was used to extract the brain.
 
     The brain extraction is conducted only on the T1w of the participant.
@@ -43,10 +44,11 @@ def apply_fsl_mask(dataset_path, mask_path, preproc_path, subject, subfolder='an
     return betted_brain_path
 
 def apply_fast(preproc_path, subject, n_classes=3, subfolder='anat'):
-    bet_path = op.join(preproc_path, subject,subfolder, '{}_T1w'.format(subject))
+    bet_path = op.join(preproc_path, subject, subfolder, '{}_T1w'.format(subject))
     segmentation_path = op.join(preproc_path, subject, subfolder, '{}_T1w_fast'.format(subject))
     fast(imgs=[bet_path], out=segmentation_path, n_classes=n_classes)
-    return bet_path
+    print('Done with fast')
+    return segmentation_path
 
 def apply_ants(preproc_path, subject, reference, type_of_transform = 'SyN', subfolder='anat' ):
     target_path = op.join(preproc_path, '{}'.format(subject), 'anat', '{}_T1w.nii.gz'.format(subject))
@@ -69,6 +71,17 @@ def apply_mcflirt(bids_root, preproc_root, subject, task, run, subfolder='func')
     path_moco_data = os.path.join(preproc_root, subject, subfolder)
     mkdir_no_exist(path_moco_data)
     path_moco_data = op.join(path_moco_data, '{}_task-{}_run-{}_bold_moco'.format(subject, task, run))
-    mcflirt(infile=path_original_data,o=path_moco_data, plots=True, report=True, dof=6, mats=True)
-    return path_moco_data
     
+    #Determine the middle volume to use as a reference for the motion correction algorithm
+    reference_epi = op.join(preproc_root, subject, subfolder, '{}_task-{}_run-{}_bold_middle-vol'.format(subject, task, run))
+    img = nib.load(path_original_data+'.nii.gz')
+    _, _, _, nbr_volumes = img.shape
+    fslroi(path_original_data, reference_epi, str(nbr_volumes //2), str(1))
+    
+    mcflirt(infile=path_original_data, o=path_moco_data, plots=True, report=True, dof=6, mats=True, reffile=reference_epi) 
+    return path_moco_data, reference_epi
+    
+
+
+
+
