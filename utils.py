@@ -4,6 +4,10 @@
 #             self.total = tsize
 #         self.update(b * bsize - self.n)
 
+import numpy as np
+import nibabel as nib
+from nilearn import image, datasets
+
 def download_url(url, output_path):
     with DownloadProgressBar(unit='B', unit_scale=True,
                              miniters=1, desc=url.split('/')[-1]) as t:
@@ -32,3 +36,20 @@ def mkdir_no_exist(path):
     import os.path as op
     if not op.isdir(path):
         os.makedirs(path)
+
+def make_mask_from_aal(mask_value, mask_name):
+    # Load the AAL atlas
+    aal_atlas = datasets.fetch_atlas_aal(version='SPM12')
+    atlas_img = image.load_img(aal_atlas.maps)
+    atlas_data = atlas_img.get_fdata()  # Extract atlas data as numpy array
+
+    # Create a binary mask for the specified region
+    mask_data = atlas_data == mask_value
+
+    # Create a new Nifti image with the mask
+    mask_img = nib.Nifti1Image(mask_data.astype(np.uint8), atlas_img.affine, atlas_img.header)
+
+    # Save the mask
+    if ".nii" not in mask_name:
+        mask_name += ".nii"
+    nib.save(mask_img, mask_name)
