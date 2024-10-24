@@ -162,10 +162,10 @@ cython_debug/
 #.idea/
 
 data/ds000171/
-data/data/derivatives/preprocessed_data/sub-control01/func/splits
-data/data/derivatives/preprocessed_data/sub-control01/func/splits_epi
-data/data/derivatives/preprocessed_data/sub-control01/func/sub-control01_task-music_run-1_bold_moco.mat/
-data/data/derivatives/preprocessed_data/sub-control01/func/sub-control01_task-music_run-2_bold_moco.mat/
-data/data/derivatives/preprocessed_data/sub-control01/func/sub-control01_task-music_run-3_bold_moco.mat/
-data/data/derivatives/preprocessed_data/sub-control01/func/sub-control01_task-music_run-all_bold_moco.mat/
+data/derivatives/preprocessed_data/sub-control01/func/splits
+data/derivatives/preprocessed_data/sub-control01/func/splits_epi
+data/derivatives/preprocessed_data/sub-control01/func/sub-control01_task-music_run-1_bold_moco.mat/
+data/derivatives/preprocessed_data/sub-control01/func/sub-control01_task-music_run-2_bold_moco.mat/
+data/derivatives/preprocessed_data/sub-control01/func/sub-control01_task-music_run-3_bold_moco.mat/
+data/derivatives/preprocessed_data/sub-control01/func/sub-control01_task-music_run-all_bold_moco.mat/
 lab_4_mySol.ipynb
