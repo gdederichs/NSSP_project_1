@@ -42,6 +42,7 @@ def apply_fsl_mask(dataset_path, mask_path, preproc_path, subject, subfolder='an
     anatomical_path = op.join(dataset_path, subject, subfolder , '{}_T1w.nii.gz'.format(subject))
     betted_brain_path = op.join(preproc_path, subject, subfolder, '{}_T1w.nii.gz'.format(subject))
     os.system('fslmaths {} -mas {} {}'.format(anatomical_path, mask_path, betted_brain_path))
+    print('Mask applied')
     return betted_brain_path
 
 def apply_fast(preproc_path, subject, n_classes=3, subfolder='anat'):
