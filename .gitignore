@@ -165,4 +165,5 @@ data/ds000171/
 data/derivatives/preprocessed_data/sub-control01/func/splits
 data/derivatives/preprocessed_data/sub-control01/func/splits_epi
 data/derivatives/preprocessed_data/sub-control01/func/*.mat*/
+data/derivatives/preprocessed_data/sub-control01/func/*_moco.mat*
 lab_4_mySol.ipynb

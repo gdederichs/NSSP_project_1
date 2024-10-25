@@ -7,6 +7,7 @@ from fsl.wrappers.misc import fslroi
 from fsl.wrappers import flirt
 import nibabel as nib
 import subprocess
+import numpy as np
 
 def get_skull_stripped_anatomical(bids_root, preproc_path, subject, robust=False):
     """
@@ -68,6 +69,46 @@ def apply_ants(preproc_path, subject, reference, type_of_transform = 'SyN', subf
     ants.image_write(warpedImage, resultAnts)
     return resultAnts
 
+""" Functional Imaging preprocessing functions"""
+
+
+def minmax_std(data, eps = 1e-20):
+    min_data = np.min(data)#, axis=-1, keepdims=True)
+    max_data = np.max(data)#, axis=-1, keepdims=True)
+    normalized_data = (data - min_data) / (max_data - min_data + eps)
+    return normalized_data
+    
+def standardize_data(data, eps = 1e-20):
+    """Standardize the NIfTI data across the time dimension (last axis)."""
+    mean = np.mean(data)#,)# axis=-1, keepdims=True)
+    std = np.std(data)#, axis=-1, keepdims=True)
+    std_adj = np.where(std > eps, std, eps)
+    return (data - mean) / std_adj
+
+
+
+def concatenate_mri_runs(bids_root, subject, task, output_path, fct='minmax'):
+    standardized_runs = []
+    
+    # Load and standardize each run
+    for i in range(3):
+        run = os.path.join(bids_root, subject, 'func', '{}_task-{}_run-{}_bold.nii.gz'.format(subject, task, i+1))
+        img = nib.load(run)
+        data = img.get_fdata()
+        print(f'Shape of the series of volumes of run {i}:', data.shape)
+        if fct == 'minmax':
+            standardized_data = minmax_std(data)
+        else:
+            standardized_data = standardize_data(data)
+        standardized_runs.append(standardized_data)
+
+    # Concatenate data along the time axis and save corresponding image
+    concatenated_data = np.concatenate(standardized_runs, axis=-1)
+    concatenated_img = nib.Nifti1Image(concatenated_data, img.affine)
+    nib.save(concatenated_img, output_path)
+    print(f"Concatenation complete. Output saved to {output_path}")
+
+
 def apply_mcflirt(bids_root, preproc_root, subject, task, run, subfolder='func'):
     path_original_data = os.path.join(bids_root, subject, subfolder, '{}_task-{}_run-{}_bold'.format(subject, task, run))
     path_moco_data = os.path.join(preproc_root, subject, subfolder)
@@ -79,7 +120,6 @@ def apply_mcflirt(bids_root, preproc_root, subject, task, run, subfolder='func')
     
     mcflirt(infile=path_original_data, o=path_moco_data, plots=True, report=True, dof=6, mats=True, reffile=reference_moco) 
     return path_moco_data, reference_moco
-    
 
 
 
