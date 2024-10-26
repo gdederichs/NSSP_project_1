@@ -8,6 +8,8 @@ from fsl.wrappers import flirt
 import nibabel as nib
 import subprocess
 import numpy as np
+import matplotlib.pyplot as plt
+import pandas as pd
 
 def get_skull_stripped_anatomical(bids_root, preproc_path, subject, robust=False):
     """
@@ -69,33 +71,37 @@ def apply_ants(preproc_path, subject, reference, type_of_transform = 'SyN', subf
     ants.image_write(warpedImage, resultAnts)
     return resultAnts
 
-""" Functional Imaging preprocessing functions"""
+"""_________________Functional Imaging preprocessing_________________"""
 
 
-def minmax_std(data, eps = 1e-20):
-    min_data = np.min(data)#, axis=-1, keepdims=True)
-    max_data = np.max(data)#, axis=-1, keepdims=True)
-    normalized_data = (data - min_data) / (max_data - min_data + eps)
+def minmax_std(data, eps = 1e-20,verbose = False):
+    min = np.min(data)#, axis=-1, keepdims=True)
+    max = np.max(data)#, axis=-1, keepdims=True)
+    if verbose:
+        print(f'Min : {min}      Max : {max}')
+    normalized_data = (data - min) / (max - min + eps)
     return normalized_data
     
-def standardize_data(data, eps = 1e-20):
+def standardize_data(data, eps = 1e-20,verbose = False):
     """Standardize the NIfTI data across the time dimension (last axis)."""
     mean = np.mean(data)#,)# axis=-1, keepdims=True)
     std = np.std(data)#, axis=-1, keepdims=True)
     std_adj = np.where(std > eps, std, eps)
+    if verbose:
+        print(f'Mean : {pd.DataFrame(mean)}      std : {pd.DataFrame(std_adj)}')
     return (data - mean) / std_adj
 
 
 
-def concatenate_mri_runs(bids_root, subject, task, output_path, fct='minmax'):
+def concatenate_mri_runs(bids_root, subject, task, output_path, fct='minmax', verbose = False):
     standardized_runs = []
     
     # Load and standardize each run
     for i in range(3):
         run = os.path.join(bids_root, subject, 'func', '{}_task-{}_run-{}_bold.nii.gz'.format(subject, task, i+1))
-        img = nib.load(run)
-        data = img.get_fdata()
-        print(f'Shape of the series of volumes of run {i}:', data.shape)
+        data = nib.load(run).get_fdata()
+        if verbose:
+            print(f'Shape of the series of volumes of run {i}:', data.shape)
         if fct == 'minmax':
             standardized_data = minmax_std(data)
         else:
@@ -105,6 +111,8 @@ def concatenate_mri_runs(bids_root, subject, task, output_path, fct='minmax'):
     # Concatenate data along the time axis and save corresponding image
     concatenated_data = np.concatenate(standardized_runs, axis=-1)
     concatenated_img = nib.Nifti1Image(concatenated_data, img.affine)
+    if output_path.split("/")[6] == 'func':
+        mkdir_no_exist(op.join('/'.join(output_path.split("/")[2:7])))
     nib.save(concatenated_img, output_path)
     print(f"Concatenation complete. Output saved to {output_path}")
 
@@ -112,7 +120,7 @@ def concatenate_mri_runs(bids_root, subject, task, output_path, fct='minmax'):
 def apply_mcflirt(bids_root, preproc_root, subject, task, run, subfolder='func'):
     path_original_data = os.path.join(bids_root, subject, subfolder, '{}_task-{}_run-{}_bold'.format(subject, task, run))
     path_moco_data = os.path.join(preproc_root, subject, subfolder)
-    mkdir_no_exist(path_moco_data)
+    
     path_moco_data = op.join(path_moco_data, '{}_task-{}_run-{}_bold_moco'.format(subject, task, run))
     
     #Determine the middle volume to use as a reference for the motion correction algorithm
@@ -152,12 +160,30 @@ def apply_epi_reg(bids_root, preproc_root, moco_path, subject, task, run, subfol
 
 
 
+"""___________________________PLOTTING__________________________________"""
+def plot_bold_data(path, timepoints:list=[30,150,250]):
+    data = nib.load(path).get_fdata()
+    for tp in timepoints:
+        volume = data[..., tp]
+        # Choose a slice e.g. the middle one
+        z_slice = volume.shape[2] // 2 
+        slice_data = volume[:, :, z_slice]
+        
+        # Plot the slice
+        plt.figure(figsize=(8, 6))
+        plt.imshow(slice_data.T, cmap="gray", origin="lower")
+        plt.colorbar()
+        plt.title(f"BOLD Signal - Time Point {tp}, Slice {z_slice}")
+        plt.xlabel("X-axis")
+        plt.ylabel("Y-axis")
+    plt.show()
 
 
-
-
-
-
+def plot_mean_voxel_intensity(path):
+    data = nib.load(path).get_fdata()
+    plt.plot(data.mean(axis=(0,1,2)))
+    plt.xlabel('Time (volume)')
+    plt.ylabel('Mean voxel intensity')
 
 
 
@@ -213,4 +239,43 @@ def apply_transform(reference_volume, target_volume, output_name, transform):
     from fsl.wrappers import applywarp
     applywarp(target_volume,reference_volume, output_name, w=transform, rel=False)
 
+def standardization_w_fsl():
+        #standardize the runs and concatenate them together
+    runs = []
+    bids_root = dataset_path
+    for i in range(3):
+        run = os.path.join(bids_root, subject, 'func', '{}_task-{}_run-{}_bold'.format(subject, task, i+1))
+        mean = run.replace('ds000171', 'derivatives/preprocessed_data') + '_mean' 
+        std = run.replace('ds000171', 'derivatives/preprocessed_data') + '_std'
+        norm = run.replace('ds000171', 'derivatives/preprocessed_data') + '_norm'
+        subprocess.run(['fslmaths', run, '-Tmean', mean]) # compute mean
+        subprocess.run(['fslmaths', run, '-Tstd', std]) # compute standard deviation
+        subprocess.run(['fslmaths', run, '-sub', mean, '-div', std, norm]) # z-score/ standardizaiton
+    
+        #delete files 
+        os.system('rm -rf {}'.format(op.join(preproc_path, subject, 'func', '*_mean*'))) 
+        os.system('rm -rf {}'.format(op.join(preproc_path, subject, 'func', '*_std*')))
+        runs.append(norm)
+        
+    all_runs = os.path.join(preproc_path, subject, 'func', '{}_task-{}_run-{}_bold'.format(subject, task, 'all'))
+    subprocess.run(['fslmerge', '-t', all_runs, runs[0], runs[1], runs[2]])
+    os.system('rm -rf {}'.format(op.join(preproc_path, subject, 'func', '*_norm*')))
 
+def standardization_w_fsl_1run():
+    # for just one run
+    i=0
+    bids_root = dataset_path
+    
+    run = os.path.join(bids_root, subject, 'func', '{}_task-{}_run-{}_bold'.format(subject, task, i+1))
+    mean = run.replace('ds000171', 'derivatives/preprocessed_data') + '_mean' 
+    std = run.replace('ds000171', 'derivatives/preprocessed_data') + '_std'
+    norm = run.replace('ds000171', 'derivatives/preprocessed_data') + '_norm'
+    subprocess.run(['fslmaths', run, '-Tmean', mean])
+    subprocess.run(['fslmaths', run, '-Tstd', std])
+    subprocess.run(['fslmaths', run, '-sub', mean, '-div', std, norm])
+    fsleyesDisplay.resetOverlays()
+    fsleyesDisplay.load(mean)
+    fsleyesDisplay.load(run)
+    fsleyesDisplay.load(norm)
+    os.system('rm -rf {}'.format(op.join(preproc_path, subject, 'func', '*_mean*')))
+    os.system('rm -rf {}'.format(op.join(preproc_path, subject, 'func', '*_std*')))
