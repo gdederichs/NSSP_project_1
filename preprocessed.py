@@ -156,7 +156,50 @@ def apply_epi_reg(bids_root, preproc_root, moco_path, subject, task, run, subfol
     return epi_reg_path, reference_epi
 
 
-
+def combine_runs(preproc_path, splits_epi_path, subject, output_path=''):
+    import progressbar
+    import gc
+    split_vols_epi = sorted(glob.glob(op.join(splits_epi_path, '*_bold_epi*')))
+    
+    first_vol = nib.load(split_vols_epi[0])
+    v_shape = first_vol.get_fdata().shape
+    '{}_task-{}_run-{}_bold_moco'
+    filename = op.join(preproc_path, subject, 'func', 'sub-control01_task-music_run-all_bold_epi_concat.dat')
+    large_array = np.memmap(filename, dtype=np.float64, mode='w+', shape=(v_shape[0],v_shape[1],v_shape[2], len(split_vols_epi)))
+    
+    batch_size = len(split_vols_epi)//4
+    
+    A = np.zeros((v_shape[0],v_shape[1],v_shape[2], batch_size))
+    
+    with progressbar.ProgressBar(max_value=len(split_vols_epi)) as bar:
+        for batch_i in range(4):
+            print('Starting for batch {}/4'.format(batch_i+1))
+            start_batch = batch_size * batch_i
+            end_batch = min(batch_size * (batch_i+1),len(split_vols_epi))
+            max_len = end_batch - start_batch + 1
+            for i in range(start_batch, end_batch):
+                vol = nib.load(split_vols_epi[i])
+                A[:,:,:,i-start_batch] = vol.get_fdata()
+                bar.update(i)
+            large_array[:,:,:, start_batch:end_batch] = A[:,:,:,:max_len]
+            gc.collect()
+    
+    print("Done flushing mmap")
+    large_array = np.memmap(filename, dtype=np.float64, mode='r', shape=(v_shape[0],v_shape[1],v_shape[2], len(produced_vols)))
+    
+    # Step 2: Modify the header to indicate that we have 4D data, and specify its TR.
+    header = first_vol.header.copy()  # Copy the header of the first volume (to get right resolution, affine, Q-form etc)
+    header['dim'][0] = 4  # Specifies that this is a 4D dataset
+    header['dim'][1:5] = large_array.shape  # Update dimensions (x, y, z, t)
+    header['pixdim'][4] = 3  # Set the TR in the 4th dimension. You can see the TR of the data by looking at your original EPI series with fslhd, remember ;)
+    print("Done with header")
+    
+    # Step 3: Create the Nifti1 image and save it to disk
+    mni_epi = op.join(preproc_path, subject, 'func', 'sub-control01_task-music_run-all_bold_epi_concat.nii.gz')
+    img = nib.Nifti1Image(large_array, first_vol.affine, first_vol.header)
+    print("Done creating the image")
+    img.to_filename(mni_epi)
+    print("Done writing it to disk")
 
 
 
