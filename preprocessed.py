@@ -99,7 +99,8 @@ def concatenate_mri_runs(bids_root, subject, task, output_path, fct='minmax', ve
     # Load and standardize each run
     for i in range(3):
         run = os.path.join(bids_root, subject, 'func', '{}_task-{}_run-{}_bold.nii.gz'.format(subject, task, i+1))
-        data = nib.load(run).get_fdata()
+        img = nib.load(run)
+        data = img.get_fdata()
         if verbose:
             print(f'Shape of the series of volumes of run {i}:', data.shape)
         if fct == 'minmax':
