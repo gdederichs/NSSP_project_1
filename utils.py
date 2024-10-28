@@ -141,21 +141,3 @@ def fsleyes_thread():
     # Keep the thread alive
     while True:
         time.sleep(1)
-
-
-def make_mask_from_aal(mask_value, mask_name):
-    # Load the AAL atlas
-    aal_atlas = datasets.fetch_atlas_aal(version='SPM12')
-    atlas_img = image.load_img(aal_atlas.maps)
-    atlas_data = atlas_img.get_fdata()  # Extract atlas data as numpy array
-
-    # Create a binary mask for the specified region
-    mask_data = atlas_data == mask_value
-
-    # Create a new Nifti image with the mask
-    mask_img = nib.Nifti1Image(mask_data.astype(np.uint8), atlas_img.affine, atlas_img.header)
-
-    # Save the mask
-    if ".nii" not in mask_name:
-        mask_name += ".nii"
-    nib.save(mask_img, mask_name)
