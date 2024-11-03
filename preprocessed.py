@@ -10,28 +10,10 @@ import subprocess
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+import progressbar
+import gc
 
 def get_skull_stripped_anatomical(bids_root, preproc_path, subject, robust=False):
-    """
-    Function to perform skull-stripping (removing the skull around the brain).
-    This is a simple wrapper around the brain extraction tool (BET) in FSL's suite
-    It assumes data to be in the BIDS format
-    The method also saves the brain mask which was used to extract the brain.
-
-    The brain extraction is conducted only on the T1w of the participant.
-
-    Parameters
-    ----------
-    bids_root: string
-        The root of the BIDS directory
-    preproc_root: string
-        The root of the preprocessed data, where the result of the brain extraction will be saved.
-    subject_id: string
-        Subject ID, the subject on which brain extraction should be conducted.
-    robust: bool
-        Whether to conduct robust center estimation with BET or not. Default is False.
-    """
-    # For now all you need to do is that we remove the bones and flesh from the MRI to get the brain!
     anatomical_path = op.join(bids_root, subject, 'anat' , '{}_T1w.nii.gz'.format(subject))
     betted_brain_path = op.join(preproc_path, subject, 'anat')
     mkdir_no_exist(betted_brain_path)
@@ -60,40 +42,33 @@ def apply_ants(preproc_path, subject, reference, type_of_transform = 'SyN', subf
     moving_image = ants.image_read(target_path)
     fixed_image = ants.image_read(reference + '.nii.gz')
 
-    # Compute the transformation (non linear) to put align the moving image to the fixed image
+    # Compute the (non linear) transformation to align the moving image to the fixed image and apply it
     transformation = ants.registration(fixed=fixed_image, moving=moving_image, type_of_transform = type_of_transform)
-
-    # After the transformation has been computed, apply it
     warpedImage = ants.apply_transforms(fixed=fixed_image, moving=moving_image, transformlist=transformation['fwdtransforms'])
-
-    # Save the image to disk
+    
     resultAnts = op.join(preproc_path, subject, subfolder, '{}_T1w_mni_{}.nii.gz'.format(subject, type_of_transform))
     ants.image_write(warpedImage, resultAnts)
     return resultAnts
 
 """_________________Functional Imaging preprocessing_________________"""
 
-
-def minmax_std(data, eps = 1e-20,verbose = False):
-    min = np.min(data)#, axis=-1, keepdims=True)
-    max = np.max(data)#, axis=-1, keepdims=True)
+def minmax_std(data, eps = 1e-20, verbose = False):
+    min = np.min(data)
+    max = np.max(data)
     if verbose:
         print(f'Min : {min}      Max : {max}')
     normalized_data = (data - min) / (max - min + eps)
     return normalized_data
     
-def standardize_data(data, eps = 1e-20,verbose = False):
-    """Standardize the NIfTI data across the time dimension (last axis)."""
-    mean = np.mean(data)#,)# axis=-1, keepdims=True)
-    std = np.std(data)#, axis=-1, keepdims=True)
+def zscore_std(data, eps = 1e-20, verbose = False):
+    mean = np.mean(data)
+    std = np.std(data)
     std_adj = np.where(std > eps, std, eps)
     if verbose:
         print(f'Mean : {pd.DataFrame(mean)}      std : {pd.DataFrame(std_adj)}')
     return (data - mean) / std_adj
 
-
-
-def concatenate_mri_runs(bids_root, subject, task, output_path, fct='minmax', verbose = False):
+def concatenate_mri_runs(bids_root, preproc_root, subject, task, output_path, fct='minmax', verbose = False, subfolder = 'func'):
     standardized_runs = []
     
     # Load and standardize each run
@@ -105,32 +80,40 @@ def concatenate_mri_runs(bids_root, subject, task, output_path, fct='minmax', ve
             print(f'Shape of the series of volumes of run {i}:', data.shape)
         if fct == 'minmax':
             standardized_data = minmax_std(data)
+        elif fct == 'zscore':
+            standardized_data = zscore_std(data)
         else:
-            standardized_data = standardize_data(data)
-        standardized_runs.append(standardized_data)
-
+            raise Exception("Error: This standardization technique is not implemented, please run again with a valid technique!")
+        standardized_runs.append(standardized_data) 
+    
     # Concatenate data along the time axis and save corresponding image
     concatenated_data = np.concatenate(standardized_runs, axis=-1)
     concatenated_img = nib.Nifti1Image(concatenated_data, img.affine)
-    if output_path.split("/")[6] == 'func':
-        mkdir_no_exist(op.join('/'.join(output_path.split("/")[2:7])))
+    
+    output_path = op.join(preproc_root, subject, subfolder)
+    mkdir_no_exist(output_path)
+    output_path = op.join(output_path, '{}_task-{}_run-{}_bold.nii.gz'.format(subject, task, 'all'))
+
     nib.save(concatenated_img, output_path)
-    print(f"Concatenation complete. Output saved to {output_path}")
+    print(f"Concatenation complete. \nOutput saved to {output_path}")
+    return output_path
 
 
-def apply_mcflirt(bids_root, preproc_root, subject, task, run, subfolder='func'):
-    path_original_data = os.path.join(bids_root, subject, subfolder, '{}_task-{}_run-{}_bold'.format(subject, task, run))
-    path_moco_data = os.path.join(preproc_root, subject, subfolder)
+def apply_mcflirt(preproc_root, subject, task, run, subfolder='func'):
+    #TODO : use mean slice
+    path_original_data = os.path.join(preproc_root, subject, subfolder, '{}_task-{}_run-{}_bold'.format(subject, task, run))
+    path_moco_data = op.join(preproc_root, subject, subfolder, '{}_task-{}_run-{}_bold_moco'.format(subject, task, run))
     
-    path_moco_data = op.join(path_moco_data, '{}_task-{}_run-{}_bold_moco'.format(subject, task, run))
-    
-    #Determine the middle volume to use as a reference for the motion correction algorithm
+    #Determine the middle volume to use as a reference
     reference_moco = extract_middle_vol(path_original_data)
     
     mcflirt(infile=path_original_data, o=path_moco_data, plots=True, report=True, dof=6, mats=True, reffile=reference_moco) 
     return path_moco_data, reference_moco
 
-
+def extract_mean_vol(path_4d_series):
+    #TODO : implement
+    #use mcflirt with the -meanvol option 
+    pass
 
 def extract_middle_vol(path_4d_series):
     output_path = path_4d_series.replace('ds000171', 'derivatives/preprocessed_data') + 'middle-vol'
@@ -138,7 +121,22 @@ def extract_middle_vol(path_4d_series):
     _, _, _, nbr_volumes = img.shape
     fslroi(path_4d_series, output_path, str(nbr_volumes //2), str(1))
     return output_path
+
+def apply_slice_timer(preproc_root, subject, task, run, input_file, slice_timing, tr, dim, subfolder='func'):
+    slice_order = np.argsort(slice_timing) + 1
+
+    # Write to a file the corresponding sorted timings :)
+    timing_path = op.join(preproc_root, subject, subfolder, '{}_task-{}_run-{}_slice-timings.txt'.format(subject, task, run)) # same for all runs 
+    file = open(timing_path, mode='w')
+    for t in slice_order:
+        file.write(str(t) + '\n')
+    file.close()
+    output_path = op.join(preproc_root, subject, 'func', 'sub-control01_task-music_run-all_bold_slice-corr')
+    subprocess.run(['slicetimer', '-i', input_file, '-o', output_path, '-r', str(tr), '-d', str(dim), '--ocustom={}'.format(timing_path)])
+    return output_path
     
+
+"""___________________________Coregistration__________________________________"""
 def apply_epi_reg(bids_root, preproc_root, moco_path, subject, task, run, subfolder='func'):
     epi_reg_path = op.join(preproc_root, subject, subfolder, '{}_task-{}_run-{}_bold_anat-space_epi'.format(subject, task, run))
     
@@ -157,24 +155,24 @@ def apply_epi_reg(bids_root, preproc_root, moco_path, subject, task, run, subfol
     return epi_reg_path, reference_epi
 
 
-def combine_runs(preproc_path, splits_epi_path, subject, output_path=''):
+def combine_splits(preproc_path, splits_epi_path, subject):
     import progressbar
     import gc
     split_vols_epi = sorted(glob.glob(op.join(splits_epi_path, '*_bold_epi*')))
     
     first_vol = nib.load(split_vols_epi[0])
     v_shape = first_vol.get_fdata().shape
-    '{}_task-{}_run-{}_bold_moco'
-    filename = op.join(preproc_path, subject, 'func', 'sub-control01_task-music_run-all_bold_epi_concat.dat')
+    mkdir_no_exist(op.join('/data', 'splits_epi'))
+    filename = op.join('/data', 'splits_epi', 'sub-control01_task-music_run-all_bold_epi_concat.dat') # data file on Neurodesk needs to be onon desktop
     large_array = np.memmap(filename, dtype=np.float64, mode='w+', shape=(v_shape[0],v_shape[1],v_shape[2], len(split_vols_epi)))
-    
-    batch_size = len(split_vols_epi)//4
+    nbr_batches= 10
+    batch_size = len(split_vols_epi)//nbr_batches
     
     A = np.zeros((v_shape[0],v_shape[1],v_shape[2], batch_size))
     
     with progressbar.ProgressBar(max_value=len(split_vols_epi)) as bar:
-        for batch_i in range(4):
-            print('Starting for batch {}/4'.format(batch_i+1))
+        for batch_i in range(nbr_batches):
+            print('Starting for batch {}/{}'.format(batch_i+1, nbr_batches))
             start_batch = batch_size * batch_i
             end_batch = min(batch_size * (batch_i+1),len(split_vols_epi))
             max_len = end_batch - start_batch + 1
@@ -185,141 +183,67 @@ def combine_runs(preproc_path, splits_epi_path, subject, output_path=''):
             large_array[:,:,:, start_batch:end_batch] = A[:,:,:,:max_len]
             gc.collect()
     
-    print("Done flushing mmap")
-    large_array = np.memmap(filename, dtype=np.float64, mode='r', shape=(v_shape[0],v_shape[1],v_shape[2], len(produced_vols)))
+    large_array = np.memmap(filename, dtype=np.float64, mode='r', shape=(v_shape[0],v_shape[1],v_shape[2], len(split_vols_epi)))
     
     # Step 2: Modify the header to indicate that we have 4D data, and specify its TR.
     header = first_vol.header.copy()  # Copy the header of the first volume (to get right resolution, affine, Q-form etc)
     header['dim'][0] = 4  # Specifies that this is a 4D dataset
     header['dim'][1:5] = large_array.shape  # Update dimensions (x, y, z, t)
-    header['pixdim'][4] = 3  # Set the TR in the 4th dimension. You can see the TR of the data by looking at your original EPI series with fslhd, remember ;)
+    header['pixdim'][4] = 3 # Set the TR in the 4th dimension.
     print("Done with header")
     
     # Step 3: Create the Nifti1 image and save it to disk
-    mni_epi = op.join(preproc_path, subject, 'func', 'sub-control01_task-music_run-all_bold_epi_concat.nii.gz')
+    epi_all = op.join('/data', 'splits_epi', 'sub-control01_task-music_run-all_bold_epi_concat.nii.gz')
     img = nib.Nifti1Image(large_array, first_vol.affine, first_vol.header)
     print("Done creating the image")
-    img.to_filename(mni_epi)
+    img.to_filename(epi_all)
+    os.system('rm -rf {}'.format(op.join('/data', 'splits_epi', '*split*'))) # remove the splits from disk
     print("Done writing it to disk")
-
+    return epi_all
 
 
 """___________________________PLOTTING__________________________________"""
+def viz_fsleyes(fsleyesDisplay, to_load:list, viz:bool=True):
+    if viz:
+        try:
+            fsleyesDisplay.resetOverlays()
+            for i, path in enumerate(to_load):
+                fsleyesDisplay.load(path)
+                colors = ['Red','Green','Blue']
+                if 'pve' in path: 
+                    fsleyesDisplay.displayCtx.getOpts(fsleyesDisplay.overlayList[i]).cmap = colors[i-1]
+        except:
+            print('Error: fsleyesDisplay has most likely not been initialized...')
+        
+
 def plot_bold_data(path, timepoints:list=[30,150,250]):
     data = nib.load(path).get_fdata()
-    for tp in timepoints:
+    nb = len(timepoints)
+    fig, axs = plt.subplots(1, nb, sharey = True, figsize = (20,6))
+    
+    for i, tp in enumerate(timepoints):
         volume = data[..., tp]
         # Choose a slice e.g. the middle one
         z_slice = volume.shape[2] // 2 
         slice_data = volume[:, :, z_slice]
         
         # Plot the slice
-        plt.figure(figsize=(8, 6))
-        plt.imshow(slice_data.T, cmap="gray", origin="lower")
-        plt.colorbar()
-        plt.title(f"BOLD Signal - Time Point {tp}, Slice {z_slice}")
-        plt.xlabel("X-axis")
-        plt.ylabel("Y-axis")
+        axs[i%nb].imshow(slice_data.T, cmap="gray", origin="lower")
+        
+        axs[i%nb].set_title(f"Time Point {tp}, z-slice {z_slice} (run {int(tp/100)+1})")
+        axs[i%nb].set_xlabel("X-axis")
+        axs[i%nb].set_ylabel("Y-axis")
+    fig.suptitle('BOLD Signal')
     plt.show()
 
 
-def plot_mean_voxel_intensity(path):
-    data = nib.load(path).get_fdata()
-    plt.plot(data.mean(axis=(0,1,2)))
+def plot_mean_voxel_intensity(all, len_run, nb_runs = 3):
+    data = nib.load(all).get_fdata()
+    for i in range(nb_runs):
+        plt.plot(data[:,:,:,i*105:(i+1)*105].mean(axis=(0,1,2)), label =f'run {i+1}')
     plt.xlabel('Time (volume)')
     plt.ylabel('Mean voxel intensity')
+    plt.title('Mean voxel intensity per run after standardization')
+    plt.legend(loc = 4)
+    plt.show()
 
-
-
-
-#delete these later
-def combine_all_transforms(reference_volume, warp_save_name, is_linear, epi_2_moco=None, epi_2_anat_warp=None, anat_2_standard_warp=None):
-    """
-    Combines transformation BEFORE motion correction all the way to standard space transformation
-    The various transformation steps are optional. As such, the final warp to compute is based on 
-    which transforms are provided.
-
-    Parameters
-    ----------
-    reference_volume: str
-        Reference volume. The end volume after all transformations have been applied, relevant for final resolution and field of view (resampling).
-    warp_save_name: str
-        Under which name to save the total warp
-    is_linear: bool
-        Whether the transformation is linear or non linear.
-    epi_2_moco: str
-        Transformation of the EPI volume to motion-correct it (located in the .mat/ folder of the EPI)
-    epi_2_anat_warp: str
-        Transformation of the EPI volume to the anatomical space, typically obtained by epi_reg. Assumed to include fieldmap correction and thus be non-linear.
-    anat_2_standard_warp: str
-        Transformation of the anatomical volume to standard space, such as the MNI152 space. Might be linear or non linear, which affects is_linear value accordingly.
-    """
-    from fsl.wrappers import convertwarp
-    args_base = {'premat': epi_2_moco, 'warp1': epi_2_anat_warp}
-    if is_linear:
-        args_base['postmat'] = anat_2_standard_warp
-    else:
-        args_base['warp2'] = anat_2_standard_warp
-    args_filtered = {k: v for k, v in args_base.items() if v is not None}
-
-    convertwarp(warp_save_name, reference_volume, **args_filtered)
-    print("Done with warp conversion")
-
-def apply_transform(reference_volume, target_volume, output_name, transform):
-    """
-    Applies a warp field to a target volume and resamples to the space of the reference volume.
-
-    Parameters
-    ----------
-    reference_volume: str
-        The reference volume for the final interpolation, resampling and POV setting
-    target_volume: str
-        The target volume to which the warp should be applied
-    output_name: str
-        The filename under which to save the new transformed image
-    transform: str
-        The filename of the warp (assumed to be a .nii.gz file)
-    """
-    from fsl.wrappers import applywarp
-    applywarp(target_volume,reference_volume, output_name, w=transform, rel=False)
-
-def standardization_w_fsl():
-        #standardize the runs and concatenate them together
-    runs = []
-    bids_root = dataset_path
-    for i in range(3):
-        run = os.path.join(bids_root, subject, 'func', '{}_task-{}_run-{}_bold'.format(subject, task, i+1))
-        mean = run.replace('ds000171', 'derivatives/preprocessed_data') + '_mean' 
-        std = run.replace('ds000171', 'derivatives/preprocessed_data') + '_std'
-        norm = run.replace('ds000171', 'derivatives/preprocessed_data') + '_norm'
-        subprocess.run(['fslmaths', run, '-Tmean', mean]) # compute mean
-        subprocess.run(['fslmaths', run, '-Tstd', std]) # compute standard deviation
-        subprocess.run(['fslmaths', run, '-sub', mean, '-div', std, norm]) # z-score/ standardizaiton
-    
-        #delete files 
-        os.system('rm -rf {}'.format(op.join(preproc_path, subject, 'func', '*_mean*'))) 
-        os.system('rm -rf {}'.format(op.join(preproc_path, subject, 'func', '*_std*')))
-        runs.append(norm)
-        
-    all_runs = os.path.join(preproc_path, subject, 'func', '{}_task-{}_run-{}_bold'.format(subject, task, 'all'))
-    subprocess.run(['fslmerge', '-t', all_runs, runs[0], runs[1], runs[2]])
-    os.system('rm -rf {}'.format(op.join(preproc_path, subject, 'func', '*_norm*')))
-
-def standardization_w_fsl_1run():
-    # for just one run
-    i=0
-    bids_root = dataset_path
-    
-    run = os.path.join(bids_root, subject, 'func', '{}_task-{}_run-{}_bold'.format(subject, task, i+1))
-    mean = run.replace('ds000171', 'derivatives/preprocessed_data') + '_mean' 
-    std = run.replace('ds000171', 'derivatives/preprocessed_data') + '_std'
-    norm = run.replace('ds000171', 'derivatives/preprocessed_data') + '_norm'
-    subprocess.run(['fslmaths', run, '-Tmean', mean])
-    subprocess.run(['fslmaths', run, '-Tstd', std])
-    subprocess.run(['fslmaths', run, '-sub', mean, '-div', std, norm])
-    fsleyesDisplay.resetOverlays()
-    fsleyesDisplay.load(mean)
-    fsleyesDisplay.load(run)
-    fsleyesDisplay.load(norm)
-    os.system('rm -rf {}'.format(op.join(preproc_path, subject, 'func', '*_mean*')))
-    os.system('rm -rf {}'.format(op.join(preproc_path, subject, 'func', '*_std*')))
