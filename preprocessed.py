@@ -68,7 +68,7 @@ def zscore_std(data, eps = 1e-20, verbose = False):
         print(f'Mean : {pd.DataFrame(mean)}      std : {pd.DataFrame(std_adj)}')
     return (data - mean) / std_adj
 
-def concatenate_mri_runs(bids_root, preproc_root, subject, task, output_path, fct='minmax', verbose = False, subfolder = 'func'):
+def concatenate_mri_runs(bids_root, preproc_root, subject, task, fct='minmax', verbose = False, subfolder = 'func'):
     standardized_runs = []
     
     # Load and standardize each run
@@ -99,21 +99,21 @@ def concatenate_mri_runs(bids_root, preproc_root, subject, task, output_path, fc
     return output_path
 
 
-def apply_mcflirt(preproc_root, subject, task, run, subfolder='func'):
-    #TODO : use mean slice
+def apply_mcflirt(preproc_root, subject, task, run, subfolder='func', ref = 'mean'):
     path_original_data = os.path.join(preproc_root, subject, subfolder, '{}_task-{}_run-{}_bold'.format(subject, task, run))
     path_moco_data = op.join(preproc_root, subject, subfolder, '{}_task-{}_run-{}_bold_moco'.format(subject, task, run))
     
     #Determine the middle volume to use as a reference
-    reference_moco = extract_middle_vol(path_original_data)
-    
-    mcflirt(infile=path_original_data, o=path_moco_data, plots=True, report=True, dof=6, mats=True, reffile=reference_moco) 
+    if ref == 'mean':
+        meanvol_bool = True
+        reference_moco = 'mean but no saved file' 
+    elif ref == 'middle':
+        meanvol_bool = False
+        reference_moco = extract_middle_vol(path_original_data)
+        
+    mcflirt(infile=path_original_data, o=path_moco_data, plots=True, report=True, dof=6, mats=True, reffile = reference_moco if not meanvol_bool else None, meanvol = meanvol_bool) 
     return path_moco_data, reference_moco
 
-def extract_mean_vol(path_4d_series):
-    #TODO : implement
-    #use mcflirt with the -meanvol option 
-    pass
 
 def extract_middle_vol(path_4d_series):
     output_path = path_4d_series.replace('ds000171', 'derivatives/preprocessed_data') + 'middle-vol'
