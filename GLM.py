@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
-
+from nilearn import datasets, image
+from nilearn.image import resample_to_img
+import ants
 
 def reg_motion(motion_outliers, n_scans):
     new_regs = []
@@ -34,3 +36,22 @@ def get_conditions_of_interest(design: pd.DataFrame, keys_to_keep: list) -> dict
     conditions_of_interest = {key: conditions[key] for key in keys_to_keep if key in conditions}
     
     return conditions_of_interest
+
+def atlas_fMRI_MNI(fmri_img, atlas_path, fMRI_MNI_path):
+    aal_atlas = datasets.fetch_atlas_aal(version='SPM12')
+    atlas_img = image.load_img(aal_atlas.maps)
+    atlas_img.to_filename(atlas_path)
+    
+    fmri_resampled = resample_to_img(fmri_img, atlas_img, interpolation='continuous')
+    mean_fmri=mean_img(fmri_resampled)
+    fmri_resampled_path = op.join(preproc_path,"sub-control01/func/sub-control01_task-music_run-all_bold_moco_resampled.nii")
+    mean_fmri.to_filename(fmri_resampled_path)
+    
+    moving_image = ants.image_read(fmri_resampled_path)
+    fixed_image = ants.image_read("data/derivatives/atlas_template.nii")
+    
+    transformation = ants.registration(fixed=fixed_image, moving=moving_image, type_of_transform = 'SyN')
+    warpedImage = ants.apply_transforms(fixed=fixed_image, moving=moving_image, transformlist=transformation['fwdtransforms'])  
+    ants.image_write(warpedImage, fMRI_MNI_path)
+
+    return aal_atlas, atlas_img, nib.load(fMRI_MNI_path)
