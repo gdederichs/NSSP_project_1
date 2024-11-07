@@ -1,8 +1,11 @@
 import numpy as np
 import pandas as pd
 from nilearn import datasets, image
-from nilearn.image import resample_to_img
+from nilearn.image import resample_to_img, mean_img
 import ants
+import os
+import os.path as op
+import nibabel as nib
 
 def reg_motion(motion_outliers, n_scans):
     new_regs = []
@@ -37,7 +40,7 @@ def get_conditions_of_interest(design: pd.DataFrame, keys_to_keep: list) -> dict
     
     return conditions_of_interest
 
-def atlas_fMRI_MNI(fmri_img, atlas_path, fMRI_MNI_path):
+def atlas_fMRI_MNI(fmri_img, atlas_path, fMRI_MNI_path, preproc_path):
     aal_atlas = datasets.fetch_atlas_aal(version='SPM12')
     atlas_img = image.load_img(aal_atlas.maps)
     atlas_img.to_filename(atlas_path)
@@ -54,4 +57,18 @@ def atlas_fMRI_MNI(fmri_img, atlas_path, fMRI_MNI_path):
     warpedImage = ants.apply_transforms(fixed=fixed_image, moving=moving_image, transformlist=transformation['fwdtransforms'])  
     ants.image_write(warpedImage, fMRI_MNI_path)
 
-    return aal_atlas, atlas_img, nib.load(fMRI_MNI_path)
+    return atlas_img, nib.load(fMRI_MNI_path)
+
+def make_combined_mask_from_aal(atlas_img, mask_values, combined_mask_name):
+    
+    atlas_data = atlas_img.get_fdata()  
+    combined_mask_data = np.zeros_like(atlas_data, dtype=np.uint8)
+
+    # Combine all regions into ta mask
+    for mask_value in mask_values:
+        combined_mask_data += (atlas_data == mask_value).astype(np.uint8)
+
+    combined_mask_img = nib.Nifti1Image(combined_mask_data, atlas_img.affine, atlas_img.header)
+
+    nib.save(combined_mask_img, combined_mask_name)
+    print(f"Saved combined mask as {combined_mask_name}")

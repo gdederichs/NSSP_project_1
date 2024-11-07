@@ -129,15 +129,3 @@ class FSLeyesServer:
     
         self.frame.Close()
         fsleyes.shutdown()
-
-def fsleyes_thread():
-    """
-    Function to run the FSLeyesServer in a separate thread.
-    This function keeps the server running indefinitely.
-    """
-    fsleyesDisplay = FSLeyesServer()
-    fsleyesDisplay.show()
-    
-    # Keep the thread alive
-    while True:
-        time.sleep(1)

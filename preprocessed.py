@@ -13,6 +13,7 @@ import pandas as pd
 import progressbar
 import gc
 
+
 def get_skull_stripped_anatomical(bids_root, preproc_path, subject, robust=False):
     anatomical_path = op.join(bids_root, subject, 'anat' , '{}_T1w.nii.gz'.format(subject))
     betted_brain_path = op.join(preproc_path, subject, 'anat')
@@ -114,6 +115,10 @@ def apply_mcflirt(preproc_root, subject, task, run, subfolder='func', ref = 'mea
     mcflirt(infile=path_original_data, o=path_moco_data, plots=True, report=True, dof=6, mats=True, reffile = reference_moco if not meanvol_bool else None, meanvol = meanvol_bool) 
     return path_moco_data, reference_moco
 
+def load_mot_params_fsl_6_dof(path):
+    return pd.read_csv(path, sep='  ', header=None, 
+            engine='python', names=['Rotation x', 'Rotation y', 'Rotation z','Translation x', 'Translation y', 'Translation z'])
+
 
 def extract_middle_vol(path_4d_series):
     output_path = path_4d_series.replace('ds000171', 'derivatives/preprocessed_data') + 'middle-vol'
@@ -121,6 +126,16 @@ def extract_middle_vol(path_4d_series):
     _, _, _, nbr_volumes = img.shape
     fslroi(path_4d_series, output_path, str(nbr_volumes //2), str(1))
     return output_path
+
+def compute_FD_power(mot_params):
+    framewise_diff = mot_params.diff().iloc[1:]
+
+    rot_params = framewise_diff[['Rotation x', 'Rotation y', 'Rotation z']]
+    # Estimating displacement on a 50mm radius sphere
+    converted_rots = rot_params*50
+    trans_params = framewise_diff[['Translation x', 'Translation y', 'Translation z']]
+    fd = converted_rots.abs().sum(axis=1) + trans_params.abs().sum(axis=1)
+    return fd
 
 def apply_slice_timer(preproc_root, subject, task, run, input_file, slice_timing, tr, dim, subfolder='func'):
     slice_order = np.argsort(slice_timing) + 1
